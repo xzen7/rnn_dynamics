@@ -5,5 +5,5 @@ in High-Dimensional Recurrent Neural Networks
 
 The basic_rnn dir replicates the 3rd example: find and visualize the slow points of the simple RNN in a 2-point averaging task
 
-The neurondata_rnn dir use Nuri's data to train the rnn listed in the neuro_gym project, and find the fixed/slow points, or other interesting dynamics. If time permits, I'll train different RNN subtypes and make a user interface to visualize dynamics for each.
+The neurondata_rnn dir use **Nuri's data** to train the rnn listed in the neuro_gym project, and find the fixed/slow points, or other interesting dynamics. If time permits, I'll **train different RNN subtypes** and make a user interface to visualize dynamics for each. compare if the internal dynamics are similar. 
 
