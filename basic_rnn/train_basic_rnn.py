@@ -68,7 +68,7 @@ for epoch in range(num_epochs):
         if (i+1) % 1 == 0: # every 1 steps
             print ('Epoch [{}/{}], Step [{}/{}], Loss: {:.4f}' 
                    .format(epoch+1, num_epochs, i+1, total_step, val_loss.item()))
-    torch.save(model.state_dict(), './models/model_epoch'+str(epoch+1)+'_validationloss{:.7f}'.format(val_loss.item())+'.pth')
+    torch.save(model.state_dict(), './models/pointavgmodel_epoch'+str(epoch+1)+'_validationloss{:.7f}'.format(val_loss.item())+'.pth')
 torch.save(model.state_dict(), './models/model_final.pth')
 
 # compute the test loss
@@ -91,5 +91,5 @@ plt.figure()
 plt.plot(training_losses, label='Training loss')    
 plt.plot(validation_losses, label='Validation loss')
 plt.legend()
-plt.savefig('./training_figs/model_epoch'+str(epoch+1)+'_validationloss{:.7f}'.format(val_loss.item())+'_testloss{:.7f}'.format(avg_test_loss)+'.png')
+plt.savefig('./training_figs/pointavgmodel_epoch'+str(epoch+1)+'_validationloss{:.7f}'.format(val_loss.item())+'_testloss{:.7f}'.format(avg_test_loss)+'.png')
 
