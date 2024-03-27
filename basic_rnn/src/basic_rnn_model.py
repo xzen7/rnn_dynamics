@@ -13,8 +13,8 @@ class SimpleRNN(nn.Module):
         h0 = torch.zeros(1, x.size(0), self.hidden_size).to(x.device)
         
         # Forward propagate RNN
-        out, _ = self.rnn(x, h0)
+        out, hn = self.rnn(x, h0)
         
         # Pass the output of the last time step to the classifier
         out = self.linear(out[:, -1, :])
-        return out
+        return out, hn.squeeze(0) # squeezed to remove the additional dimension added by the batch

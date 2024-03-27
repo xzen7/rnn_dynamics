@@ -43,7 +43,7 @@ for epoch in range(num_epochs):
         labels = labels.to(device)
         
         # Forward pass
-        outputs = model(sequences)
+        outputs = model(sequences)[0]
         outputs = outputs.squeeze()
         training_loss = criterion(outputs, labels)
         training_losses.append(training_loss.item())
@@ -54,7 +54,7 @@ for epoch in range(num_epochs):
             for val_sequences, val_labels in validation_dataloader:
                 val_sequences = val_sequences.to(device)
                 val_labels = val_labels.to(device)
-                val_outputs = model(val_sequences)
+                val_outputs = model(val_sequences)[0]
                 val_outputs = val_outputs.squeeze()
                 val_loss = criterion(val_outputs, val_labels)
                 validation_losses.append(val_loss.item())
@@ -78,7 +78,7 @@ with torch.no_grad():
     for test_sequences, test_labels in test_dataloader:
         test_sequences = test_sequences.to(device)
         test_labels = test_labels.to(device)
-        test_outputs = model(test_sequences)
+        test_outputs = model(test_sequences)[0]
         test_outputs = test_outputs.squeeze()
         test_loss = criterion(test_outputs, test_labels)
         test_losses.append(test_loss.item())

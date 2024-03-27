@@ -35,6 +35,30 @@ from torch.autograd import grad
 import matplotlib.pyplot as plt
 import time
 
+def vmap(func, in_axes=(0,)):
+    def wrapped_func(*args):
+        # Determine the batch dimension(s) based on in_axes
+        batch_axes = [axis for axis in in_axes if axis < len(args)]
+
+        # Check if all batch axes have the same size
+        batch_size = args[batch_axes[0]].size(0)
+        assert all(args[axis].size(0) == batch_size for axis in batch_axes), \
+            "Batch dimensions must have the same size"
+
+        # Apply func element-wise over batch dimension(s)
+        outputs = []
+        for i in range(batch_size):
+            args_i = [arg[i] for arg in args]
+            output = func(*args_i)
+            outputs.append(output)
+
+        # Stack outputs along batch dimension
+        outputs_stacked = torch.stack(outputs, dim=0)
+
+        return outputs_stacked
+
+    return wrapped_func
+
 def find_fixed_points(rnn_fun, candidates, hps, do_print=True):
   """Top-level routine to find fixed points, keeping only valid fixed points.
 
@@ -115,7 +139,7 @@ def get_fp_loss_fun(rnn_fun):
   Returns: function that computes the loss for each example
   """
   batch_rnn_fun = vmap(rnn_fun, in_axes=(0,))
-  return jit(lambda h : np.mean((h - batch_rnn_fun(h))**2, axis=1))
+  return lambda h : np.mean((h - batch_rnn_fun(h))**2, axis=1)
 
 
 def get_total_fp_loss_fun(rnn_fun):
@@ -128,7 +152,7 @@ def get_total_fp_loss_fun(rnn_fun):
   Returns: function that computes the average loss over all examples.
   """
   fp_loss_fun = get_fp_loss_fun(rnn_fun)
-  return jit(lambda h : np.mean(fp_loss_fun(h)))
+  return lambda h : np.mean(fp_loss_fun(h))
 
 
 def optimize_fp_core(batch_idx_start, num_batches, update_fun, opt_state):
@@ -150,12 +174,13 @@ def optimize_fp_core(batch_idx_start, num_batches, update_fun, opt_state):
     opt_state = update_fun(batch_idx, opt_state)
     return opt_state
 
-  lower = batch_idx_start
-  upper = batch_idx_start + num_batches
-  return lax.fori_loop(lower, upper, run_update, opt_state)
+  for batch_idx in range(batch_idx_start, batch_idx_start + num_batches):
+    opt_state = run_update(batch_idx, opt_state)
+
+  return opt_state
 
 
-optimize_fp_core_jit = jit(optimize_fp_core, static_argnums=(1, 2, 3))
+# optimize_fp_core_jit = torch.jit.script(optimize_fp_core)
 
 
 def optimize_fps(rnn_fun, fp_candidates, hps, do_print=True):
@@ -196,51 +221,121 @@ def optimize_fps(rnn_fun, fp_candidates, hps, do_print=True):
     return update
 
   # Build some functions used in optimization.
-  decay_fun = optimizers.exponential_decay(hps['step_size'],
-                                           hps['decay_steps'],
-                                           hps['decay_factor'])
-  opt_init, opt_update, get_params = optimizers.adam(step_size=decay_fun,
-                                                     b1=hps['adam_b1'],
-                                                     b2=hps['adam_b2'],
-                                                     eps=hps['adam_eps'])
-  opt_state = opt_init(fp_candidates)
-  update_fun = get_update_fun(opt_update, get_params)
+  # decay_fun = optimizers.exponential_decay(hps['step_size'],
+  #                                          hps['decay_steps'],
+  #                                          hps['decay_factor'])
+  # opt_init, opt_update, get_params = optimizers.adam(step_size=decay_fun,
+  #                                                    b1=hps['adam_b1'],
+  #                                                    b2=hps['adam_b2'],
+  #                                                    eps=hps['adam_eps'])
 
-  # Run the optimization, pausing every so often to collect data and
-  # print status.
+
+  # opt_state = opt_init(fp_candidates)
+  # update_fun = get_update_fun(opt_update, get_params)
+
+  # # Run the optimization, pausing every so often to collect data and
+  # # print status.
+  # batch_size = fp_candidates.shape[0]
+  # num_batches = hps['num_batches']
+  # print_every = hps['opt_print_every']
+  # num_opt_loops = int(num_batches / print_every)
+  # fps = get_params(opt_state)
+  # fp_losses = []
+  # do_stop = False
+  # for oidx in range(num_opt_loops):
+  #   if do_stop:
+  #     break
+  #   batch_idx_start = oidx * print_every
+  #   start_time = time.time()
+  #   opt_state = optimize_fp_core(batch_idx_start, print_every, update_fun,
+  #                                    opt_state)
+  #   batch_time = time.time() - start_time
+
+  #   # Training loss
+  #   fps = get_params(opt_state)
+  #   batch_pidx = batch_idx_start + print_every
+  #   total_fp_loss = total_fp_loss_fun(fps)
+  #   fp_losses.append(total_fp_loss)
+    
+  #   # Saving, printing.
+  #   if do_print:
+  #     s = "    Batches {}-{} in {:0.2f} sec, Step size: {:0.5f}, Training loss {:0.5f}"
+  #     print(s.format(batch_idx_start+1, batch_pidx, batch_time,
+  #                    decay_fun(batch_pidx), total_fp_loss))
+
+  #   if total_fp_loss < hps['fp_opt_stop_tol']:
+  #     do_stop = True
+  #     if do_print:
+  #       print('Stopping as mean training loss {:0.5f} is below tolerance {:0.5f}.'.format(total_fp_loss, hps['fp_opt_stop_tol']))
+  #   optimizer_details = {'fp_losses' : fp_losses}    
+  # return fps, optimizer_details
+  import torch
+  import torch.optim as optim
+  import time
+
+  # Define exponential decay function
+  def exponential_decay(step_size, decay_steps, decay_factor):
+      return lambda step: step_size * decay_factor ** (step / decay_steps)
+
+  # Define optimizer initialization and update functions
+  def adam_optimizer(parameters, step_size, b1, b2, eps):
+      optimizer = optim.Adam(parameters, lr=step_size, betas=(b1, b2), eps=eps)
+      return optimizer
+
+  # Define optimization core function
+  def optimize_fp_core(batch_idx_start, num_batches, update_fun, opt_state):
+      for batch_idx in range(batch_idx_start, batch_idx_start + num_batches):
+          opt_state = update_fun(batch_idx, opt_state)
+      return opt_state
+
+
+  # Decay function
+  decay_fun = exponential_decay(hps['step_size'], hps['decay_steps'], hps['decay_factor'])
+
+  # Optimizer initialization and update functions
+  opt_init = lambda parameters: adam_optimizer(parameters, decay_fun(0), hps['adam_b1'], hps['adam_b2'], hps['adam_eps'])
+  # opt_update = lambda step, grad, state: state  # We will not use PyTorch's optimizer update function directly
+  get_params = lambda opt_state: opt_state.param_groups[0]['params']
+
+  # Initialize optimizer state
+  opt_state = opt_init(fp_candidates)
+
+
+  # Run optimization loop
   batch_size = fp_candidates.shape[0]
   num_batches = hps['num_batches']
   print_every = hps['opt_print_every']
-  num_opt_loops = int(num_batches / print_every)
+  num_opt_loops = num_batches // print_every
   fps = get_params(opt_state)
   fp_losses = []
   do_stop = False
+
   for oidx in range(num_opt_loops):
-    if do_stop:
-      break
-    batch_idx_start = oidx * print_every
-    start_time = time.time()
-    opt_state = optimize_fp_core_jit(batch_idx_start, print_every, update_fun,
-                                     opt_state)
-    batch_time = time.time() - start_time
+      if do_stop:
+          break
+      
+      batch_idx_start = oidx * print_every
+      start_time = time.time()
+      
+      # Update optimizer state
+      opt_state = optimize_fp_core(batch_idx_start, print_every, get_update_fun, opt_state)
+      batch_time = time.time() - start_time
 
-    # Training loss
-    fps = get_params(opt_state)
-    batch_pidx = batch_idx_start + print_every
-    total_fp_loss = total_fp_loss_fun(fps)
-    fp_losses.append(total_fp_loss)
-    
-    # Saving, printing.
-    if do_print:
+      # Training loss
+      fps = get_params(opt_state)
+      batch_pidx = batch_idx_start + print_every
+      total_fp_loss = total_fp_loss_fun(fps)
+      fp_losses.append(total_fp_loss)
+      
+      # Saving, printing.
       s = "    Batches {}-{} in {:0.2f} sec, Step size: {:0.5f}, Training loss {:0.5f}"
-      print(s.format(batch_idx_start+1, batch_pidx, batch_time,
-                     decay_fun(batch_pidx), total_fp_loss))
+      print(s.format(batch_idx_start + 1, batch_pidx, batch_time, decay_fun(batch_pidx), total_fp_loss))
 
-    if total_fp_loss < hps['fp_opt_stop_tol']:
-      do_stop = True
-      if do_print:
-        print('Stopping as mean training loss {:0.5f} is below tolerance {:0.5f}.'.format(total_fp_loss, hps['fp_opt_stop_tol']))
-    optimizer_details = {'fp_losses' : fp_losses}    
+      if total_fp_loss < hps['fp_opt_stop_tol']:
+          do_stop = True
+          print('Stopping as mean training loss {:0.5f} is below tolerance {:0.5f}.'.format(total_fp_loss, hps['fp_opt_stop_tol']))
+
+  optimizer_details = {'fp_losses': fp_losses}
   return fps, optimizer_details
 
 
@@ -363,7 +458,7 @@ def compute_jacobians(rnn_fun, points):
     npoints number of jacobians, np array with shape npoints x dim x dim
   """
   dFdh = torch.autograd.functional.jacobian(rnn_fun)
-  batch_dFdh = torch.vmap(dFdh, in_dims=(0,))
+  batch_dFdh = vmap(dFdh, in_dims=(0,))
   return batch_dFdh(points)
 
 
